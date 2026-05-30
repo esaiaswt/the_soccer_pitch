@@ -21,6 +21,7 @@ import uvicorn
 from dotenv import load_dotenv
 
 from pitch import api
+from pitch import scoreboard
 from pitch.audio import AudioManager
 from pitch.config import Config
 from pitch.logging_config import log_startup, setup_logging
@@ -93,6 +94,9 @@ def main() -> None:
 
     # Wire state_manager into the API module
     api.state_manager = state_manager
+
+    # Wire state_manager into the scoreboard module
+    scoreboard.state_manager = state_manager
 
     # Initialize pygame.mixer for audio
     try:

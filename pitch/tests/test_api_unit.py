@@ -34,7 +34,7 @@ async def test_get_state_returns_200_with_default_state():
     assert data["match_state"] == "Waiting"
     assert data["time_left"] == 90.0
     assert data["score"] == {"Red": 0, "Blue": 0}
-    assert data["ball"] == {"x": 600.0, "y": 400.0}
+    assert data["ball"] == {"x": 600.0, "y": 425.0}
     assert data["players"] == {}
 
 
@@ -101,8 +101,8 @@ async def test_post_action_returns_400_for_invalid_team():
 
 
 @pytest.mark.asyncio
-async def test_post_action_returns_403_in_waiting_state():
-    """POST /api/action returns 403 when match is in Waiting state."""
+async def test_post_action_allowed_in_waiting_state_spawns_player(setup_state_manager):
+    """POST /api/action in Waiting state spawns player at default position (no movement)."""
     transport = ASGITransport(app=api.app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
@@ -115,8 +115,46 @@ async def test_post_action_returns_403_in_waiting_state():
             },
         )
 
-    assert response.status_code == 403
-    assert "Match has not started" in response.json()["error"]
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert "Red_Striker" in setup_state_manager.state.players
+    # Player should be at default position (movement suppressed in Waiting)
+    from pitch.state import _get_default_position
+    default_pos = _get_default_position("Red", "Striker")
+    player = setup_state_manager.state.players["Red_Striker"]
+    assert player.x == default_pos["x"]
+    assert player.y == default_pos["y"]
+
+
+@pytest.mark.asyncio
+async def test_post_action_kick_suppressed_in_waiting_state(setup_state_manager):
+    """POST /api/action in Waiting state ignores kick attempts."""
+    from pitch.state import Player
+
+    setup_state_manager.acquire()
+    setup_state_manager.state.players["Red_Striker"] = Player(
+        name="Red_Striker", team="Red", x=600.0, y=425.0
+    )
+    setup_state_manager.state.ball.x = 610.0
+    setup_state_manager.state.ball.y = 425.0
+    setup_state_manager.release()
+
+    transport = ASGITransport(app=api.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/action",
+            json={
+                "team": "Red",
+                "position": "Striker",
+                "vector": {"dx": 0.0, "dy": 0.0},
+                "kick": True,
+            },
+        )
+
+    assert response.status_code == 200
+    # Ball velocity should remain zero (kick suppressed)
+    assert setup_state_manager.state.ball.vx == 0.0
+    assert setup_state_manager.state.ball.vy == 0.0
 
 
 @pytest.mark.asyncio

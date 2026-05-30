@@ -32,9 +32,8 @@ COLOR_HUD_BG = (30, 30, 30)
 COLOR_BALL_FILL = (255, 255, 255)
 COLOR_BALL_OUTLINE = (0, 0, 0)
 
-# Pitch layout
-GOAL_ZONE_LEFT = pygame.Rect(0, 300, 30, 200)
-GOAL_ZONE_RIGHT = pygame.Rect(1170, 300, 30, 200)
+# Pitch layout — goal zones are computed dynamically in render_pitch()
+# to stay vertically centered in the play area (below HUD)
 CENTER_CIRCLE_RADIUS = 80
 PENALTY_AREA_WIDTH = 120
 PENALTY_AREA_HEIGHT = 300
@@ -119,7 +118,7 @@ class Renderer:
             ball_x = state.ball.x
             ball_y = state.ball.y
             players = {
-                name: (p.team, p.x, p.y, p.name)
+                name: (p.team, p.x, p.y, p.display_name or name)
                 for name, p in state.players.items()
             }
         finally:
@@ -177,9 +176,13 @@ class Renderer:
         )
         pygame.draw.rect(self._screen, COLOR_WHITE, penalty_right, 2)
 
-        # Goal zones
-        pygame.draw.rect(self._screen, COLOR_GOAL_LEFT, GOAL_ZONE_LEFT)
-        pygame.draw.rect(self._screen, COLOR_GOAL_RIGHT, GOAL_ZONE_RIGHT)
+        # Goal zones (centered vertically in the play area)
+        goal_zone_height = 200
+        goal_zone_y = center_y - goal_zone_height // 2
+        goal_zone_left = pygame.Rect(0, goal_zone_y, 30, goal_zone_height)
+        goal_zone_right = pygame.Rect(SCREEN_WIDTH - 30, goal_zone_y, 30, goal_zone_height)
+        pygame.draw.rect(self._screen, COLOR_GOAL_LEFT, goal_zone_left)
+        pygame.draw.rect(self._screen, COLOR_GOAL_RIGHT, goal_zone_right)
 
         # Outer boundary
         boundary = pygame.Rect(0, HUD_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - HUD_HEIGHT)

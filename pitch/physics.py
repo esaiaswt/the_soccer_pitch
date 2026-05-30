@@ -189,34 +189,57 @@ class PhysicsEngine:
     def check_goal(self, state: GameState) -> None:
         """Detect if the ball has entered a goal zone and handle scoring.
 
-        Goal zones:
-        - Left goal: x in [0, 30], y in [300, 500] → Blue team scores
-        - Right goal: x in [1170, 1200], y in [300, 500] → Red team scores
+        Goal zones (centered in play area, center_y=425):
+        - Left goal: x in [0, 30], y in [325, 525] → Blue team scores
+        - Right goal: x in [1170, 1200], y in [325, 525] → Red team scores
 
         Uses goal_scored_flag to prevent double-scoring on the same
-        goal zone entry.
+        goal zone entry. Records the goal event with scorer attribution.
 
         Args:
             state: The current game state.
         """
+        from pitch.state import GoalEvent
+
         if state.goal_scored_flag:
             return
 
         ball = state.ball
+        match_duration = 90.0  # from config
 
         # Left goal zone: Blue scores
-        if ball.x <= 30.0 and 300.0 <= ball.y <= 500.0:
+        if ball.x <= 30.0 and 325.0 <= ball.y <= 525.0:
             state.score["Blue"] += 1
             state.goal_scored_flag = True
             self._goal_pause_remaining = GOAL_PAUSE_DURATION
+
+            # Record goal event
+            elapsed = match_duration - state.time_left
+            scorer = state.last_kicker if state.last_kicker else "Unknown"
+            state.goal_log.append(GoalEvent(
+                time=elapsed,
+                team="Blue",
+                scorer=scorer,
+            ))
+
             if self._on_goal:
                 self._on_goal()
 
         # Right goal zone: Red scores
-        elif ball.x >= 1170.0 and 300.0 <= ball.y <= 500.0:
+        elif ball.x >= 1170.0 and 325.0 <= ball.y <= 525.0:
             state.score["Red"] += 1
             state.goal_scored_flag = True
             self._goal_pause_remaining = GOAL_PAUSE_DURATION
+
+            # Record goal event
+            elapsed = match_duration - state.time_left
+            scorer = state.last_kicker if state.last_kicker else "Unknown"
+            state.goal_log.append(GoalEvent(
+                time=elapsed,
+                team="Red",
+                scorer=scorer,
+            ))
+
             if self._on_goal:
                 self._on_goal()
 
@@ -264,6 +287,6 @@ class PhysicsEngine:
             ball: The ball entity to reset.
         """
         ball.x = 600.0
-        ball.y = 400.0
+        ball.y = 425.0
         ball.vx = 0.0
         ball.vy = 0.0

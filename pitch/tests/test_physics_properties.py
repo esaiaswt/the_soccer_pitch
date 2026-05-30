@@ -100,8 +100,8 @@ from pitch.state import GameState, MatchState
 class TestGoalDetectionAndScoring:
     """Property 10: Goal detection and scoring.
 
-    For any ball position that enters a goal zone (left: x 0-30, y 300-500 or
-    right: x 1170-1200, y 300-500) for the first time (ball was previously outside),
+    For any ball position that enters a goal zone (left: x 0-30, y 325-525 or
+    right: x 1170-1200, y 325-525) for the first time (ball was previously outside),
     the opposing team's score shall increment by exactly 1. Subsequent ticks with
     the ball still inside the same zone shall not increment the score again.
 
@@ -128,8 +128,8 @@ class TestGoalDetectionAndScoring:
         # Call check_goal
         engine.check_goal(state)
 
-        in_left_goal = ball_x <= 30.0 and 300.0 <= ball_y <= 500.0
-        in_right_goal = ball_x >= 1170.0 and 300.0 <= ball_y <= 500.0
+        in_left_goal = ball_x <= 30.0 and 325.0 <= ball_y <= 525.0
+        in_right_goal = ball_x >= 1170.0 and 325.0 <= ball_y <= 525.0
 
         if in_left_goal:
             # Blue scores when ball enters left goal

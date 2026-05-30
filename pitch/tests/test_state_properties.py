@@ -134,7 +134,7 @@ class TestPostGoalResetInvariant:
 
         # Assert ball resets to center with zero velocity
         assert state.ball.x == 600.0
-        assert state.ball.y == 400.0
+        assert state.ball.y == 425.0
         assert state.ball.vx == 0.0
         assert state.ball.vy == 0.0
 
@@ -151,12 +151,12 @@ class TestPostGoalResetInvariant:
 
 
 # Feature: the-pitch, Property 9: Score preservation across match reset
-class TestScorePreservationAcrossMatchReset:
-    """Property 9: Score preservation across match reset.
+class TestScoreResetAcrossMatchReset:
+    """Property 9: Score reset across match reset.
 
     For any score state (Red: n, Blue: m) when the timer expires and match
-    transitions from Playing to Waiting, the score values shall remain
-    unchanged after the transition.
+    transitions from Playing to Waiting, the score values shall reset to 0
+    for the new match. The previous match score is saved in previous_match.
 
     **Validates: Requirements 5.6**
     """
@@ -166,8 +166,8 @@ class TestScorePreservationAcrossMatchReset:
         blue_score=st.integers(min_value=0, max_value=100),
     )
     @settings(max_examples=100)
-    def test_scores_preserved_after_reset_match(self, red_score: int, blue_score: int):
-        """Scores remain unchanged after Playing -> Waiting transition via reset_match()."""
+    def test_scores_reset_after_reset_match(self, red_score: int, blue_score: int):
+        """Scores reset to 0 after Playing -> Waiting transition via reset_match()."""
         # Set up a StateManager with match_state=PLAYING and the generated scores
         sm = StateManager()
         sm.acquire()
@@ -177,7 +177,7 @@ class TestScorePreservationAcrossMatchReset:
         # Call reset_match (simulates timer expiry triggering Playing -> Waiting)
         sm.reset_match()
 
-        # Assert that the score dict is unchanged after the reset
-        assert sm.state.score["Red"] == red_score
-        assert sm.state.score["Blue"] == blue_score
+        # Assert that the score resets to 0 for new match
+        assert sm.state.score["Red"] == 0
+        assert sm.state.score["Blue"] == 0
         sm.release()

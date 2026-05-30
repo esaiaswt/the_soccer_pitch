@@ -72,7 +72,7 @@ async def test_get_state_waiting_returns_correct_schema(setup_state_manager):
     assert isinstance(data["score"]["Red"], int)
     assert isinstance(data["score"]["Blue"], int)
 
-    assert data["ball"] == {"x": 600.0, "y": 400.0}
+    assert data["ball"] == {"x": 600.0, "y": 425.0}
     assert isinstance(data["ball"], dict)
     assert isinstance(data["ball"]["x"], float)
     assert isinstance(data["ball"]["y"], float)
@@ -82,15 +82,15 @@ async def test_get_state_waiting_returns_correct_schema(setup_state_manager):
 
 
 # ---------------------------------------------------------------------------
-# Test 2: POST /api/action returns 403 in Waiting state
+# Test 2: POST /api/action allowed in Waiting state (spawn only, no movement/kick)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_post_action_rejected_in_waiting_state(setup_state_manager):
-    """POST /api/action returns 403 when match_state is Waiting.
+async def test_post_action_allowed_in_waiting_state(setup_state_manager):
+    """POST /api/action in Waiting state spawns player but suppresses movement and kicks.
 
-    Validates: Requirements 8.5
+    Validates: Players appear on pitch before match starts, stationary at default positions.
     """
     transport = ASGITransport(app=api.app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -99,18 +99,26 @@ async def test_post_action_rejected_in_waiting_state(setup_state_manager):
             json={
                 "team": "Red",
                 "position": "Striker",
-                "vector": {"dx": 1.0, "dy": 0.0},
-                "kick": False,
+                "vector": {"dx": 1.0, "dy": 0.5},
+                "kick": True,  # kick should be suppressed
             },
         )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
     data = response.json()
-    assert "error" in data
-    assert "Match has not started" in data["error"]
+    assert data["status"] == "ok"
 
-    # Verify no players were spawned (state unchanged)
-    assert len(setup_state_manager.state.players) == 0
+    # Player should be spawned at default position (movement suppressed)
+    assert "Red_Striker" in setup_state_manager.state.players
+    from pitch.state import _get_default_position
+    default_pos = _get_default_position("Red", "Striker")
+    player = setup_state_manager.state.players["Red_Striker"]
+    assert player.x == default_pos["x"]
+    assert player.y == default_pos["y"]
+
+    # Ball velocity should be zero (kick suppressed in Waiting)
+    assert setup_state_manager.state.ball.vx == 0.0
+    assert setup_state_manager.state.ball.vy == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -160,9 +168,9 @@ async def test_full_match_lifecycle(setup_state_manager):
         assert "Red_Striker" in data["players"]
 
         # Step 6: Simulate a goal by moving ball into left goal zone
-        # (Blue scores when ball enters left goal zone: x 0-30, y 300-500)
+        # (Blue scores when ball enters left goal zone: x 0-30, y 325-525)
         setup_state_manager.state.ball.x = 10.0
-        setup_state_manager.state.ball.y = 400.0
+        setup_state_manager.state.ball.y = 425.0
 
         # Use physics check_goal to detect and score
         from pitch.physics import PhysicsEngine
@@ -192,7 +200,7 @@ async def test_full_match_lifecycle(setup_state_manager):
         response = await client.get("/api/state")
         data = response.json()
         assert data["ball"]["x"] == 600.0
-        assert data["ball"]["y"] == 400.0
+        assert data["ball"]["y"] == 425.0
 
         # Step 10: Simulate timer expiry
         setup_state_manager.acquire()
@@ -202,13 +210,14 @@ async def test_full_match_lifecycle(setup_state_manager):
         finally:
             setup_state_manager.release()
 
-        # Step 11: Verify match transitioned back to Waiting with score preserved
+        # Step 11: Verify match transitioned back to Waiting with score reset
         response = await client.get("/api/state")
         data = response.json()
         assert data["match_state"] == "Waiting"
         assert data["time_left"] == 90.0
-        # Score is preserved across match reset
-        assert data["score"]["Blue"] == 1
+        # Score resets for new match
+        assert data["score"]["Blue"] == 0
+        assert data["score"]["Red"] == 0
 
 
 # ---------------------------------------------------------------------------

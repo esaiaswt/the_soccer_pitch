@@ -29,7 +29,7 @@ class TestBall:
     def test_default_values(self):
         ball = Ball()
         assert ball.x == 600.0
-        assert ball.y == 400.0
+        assert ball.y == 425.0
         assert ball.vx == 0.0
         assert ball.vy == 0.0
 
@@ -61,7 +61,7 @@ class TestGameState:
         assert state.time_left == 90.0
         assert state.score == {"Red": 0, "Blue": 0}
         assert state.ball.x == 600.0
-        assert state.ball.y == 400.0
+        assert state.ball.y == 425.0
         assert state.players == {}
         assert state.goal_scored_flag is False
 
@@ -70,16 +70,16 @@ class TestDefaultPositions:
     """Tests for default starting positions."""
 
     def test_red_team_x_range(self):
-        for pos in DEFAULT_POSITIONS["Red"]:
+        for pos in DEFAULT_POSITIONS["Red"].values():
             assert 100.0 <= pos["x"] <= 550.0
 
     def test_blue_team_x_range(self):
-        for pos in DEFAULT_POSITIONS["Blue"]:
+        for pos in DEFAULT_POSITIONS["Blue"].values():
             assert 650.0 <= pos["x"] <= 1100.0
 
     def test_positions_within_pitch(self):
         for team in DEFAULT_POSITIONS.values():
-            for pos in team:
+            for pos in team.values():
                 assert 0.0 <= pos["x"] <= 1200.0
                 assert 0.0 <= pos["y"] <= 800.0
 
@@ -93,7 +93,7 @@ class TestStateManager:
         assert snap["match_state"] == "Waiting"
         assert snap["time_left"] == 90.0
         assert snap["score"] == {"Red": 0, "Blue": 0}
-        assert snap["ball"] == {"x": 600.0, "y": 400.0}
+        assert snap["ball"] == {"x": 600.0, "y": 425.0}
         assert snap["players"] == {}
 
     def test_acquire_release(self):
@@ -181,7 +181,7 @@ class TestStateManager:
         sm.reset_after_goal()
         # Ball should be at center with zero velocity
         assert sm.state.ball.x == 600.0
-        assert sm.state.ball.y == 400.0
+        assert sm.state.ball.y == 425.0
         assert sm.state.ball.vx == 0.0
         assert sm.state.ball.vy == 0.0
         # Player should be at default position
@@ -191,7 +191,7 @@ class TestStateManager:
         assert player.y == default_pos["y"]
         sm.release()
 
-    def test_reset_match_preserves_score(self):
+    def test_reset_match_resets_score(self):
         sm = StateManager()
         sm.acquire()
         sm.state.match_state = MatchState.PLAYING
@@ -199,10 +199,10 @@ class TestStateManager:
         sm.state.time_left = 10.0
         sm.reset_match()
         assert sm.state.match_state == MatchState.WAITING
-        assert sm.state.score == {"Red": 3, "Blue": 2}
+        assert sm.state.score == {"Red": 0, "Blue": 0}
         assert sm.state.time_left == 90.0
         assert sm.state.ball.x == 600.0
-        assert sm.state.ball.y == 400.0
+        assert sm.state.ball.y == 425.0
         assert sm.state.ball.vx == 0.0
         assert sm.state.ball.vy == 0.0
         assert sm.state.goal_scored_flag is False

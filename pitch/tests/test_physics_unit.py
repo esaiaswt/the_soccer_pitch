@@ -176,7 +176,7 @@ class TestCheckGoal:
     def test_left_goal_outside_y_range(self, engine, state_manager):
         state = state_manager.state
         state.ball.x = 15.0
-        state.ball.y = 200.0  # Outside 300-500
+        state.ball.y = 200.0  # Outside 325-525
         engine.check_goal(state)
         assert state.score["Blue"] == 0
         assert state.goal_scored_flag is False
@@ -184,7 +184,7 @@ class TestCheckGoal:
     def test_right_goal_outside_y_range(self, engine, state_manager):
         state = state_manager.state
         state.ball.x = 1185.0
-        state.ball.y = 600.0  # Outside 300-500
+        state.ball.y = 600.0  # Outside 325-525
         engine.check_goal(state)
         assert state.score["Red"] == 0
         assert state.goal_scored_flag is False
@@ -240,7 +240,7 @@ class TestNaNInfHandling:
         state.ball.vy = 5.0
         engine.tick(1.0 / 60.0)
         assert state.ball.x == 600.0
-        assert state.ball.y == 400.0
+        assert state.ball.y == 425.0
         assert state.ball.vx == 0.0
         assert state.ball.vy == 0.0
 
@@ -253,7 +253,7 @@ class TestNaNInfHandling:
         state.ball.vy = 5.0
         engine.tick(1.0 / 60.0)
         assert state.ball.x == 600.0
-        assert state.ball.y == 400.0
+        assert state.ball.y == 425.0
         assert state.ball.vx == 0.0
         assert state.ball.vy == 0.0
 
@@ -266,7 +266,7 @@ class TestNaNInfHandling:
         state.ball.vy = 5.0
         engine.tick(1.0 / 60.0)
         assert state.ball.x == 600.0
-        assert state.ball.y == 400.0
+        assert state.ball.y == 425.0
         assert state.ball.vx == 0.0
         assert state.ball.vy == 0.0
 
@@ -319,7 +319,7 @@ class TestGoalPause:
         assert state.goal_scored_flag is False
         # Ball should be reset to center after goal
         assert state.ball.x == 600.0
-        assert state.ball.y == 400.0
+        assert state.ball.y == 425.0
 
 
 class TestTickIntegration:

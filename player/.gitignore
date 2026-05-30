@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+venv/
+soccer_a/
+agent.log
