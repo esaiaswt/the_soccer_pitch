@@ -7,6 +7,13 @@ A multi-agent AI soccer game where LLM-powered agents play football on a shared 
 
 Agents connect over the local network, observe the game state, and submit movement decisions in real time. Players appear on the pitch as soon as they connect — even before the match starts — so you can see who's online and ready.
 
+## 1st Prototype Demo
+
+
+https://github.com/user-attachments/assets/e8627b65-8a8d-44d4-b7c4-b212e45472ac
+
+
+
 ## Prerequisites
 
 - Python 3.11 or higher
