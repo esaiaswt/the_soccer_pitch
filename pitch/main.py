@@ -143,6 +143,7 @@ def main() -> None:
 
     # Run Renderer on the main thread (blocks until PyGame quit)
     renderer = Renderer(state_manager=state_manager, local_ip=local_ip)
+    renderer._detect_ip_func = detect_local_ip
     try:
         renderer.run()
     except Exception as e:

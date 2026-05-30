@@ -5,6 +5,8 @@ including players, ball, field lines, goal zones, and HUD.
 Handles keyboard events (spacebar to start, quit to exit).
 """
 
+import time
+
 import pygame
 
 from pitch.config import Config
@@ -58,6 +60,9 @@ class Renderer:
         self._screen: pygame.Surface | None = None
         self._clock: pygame.time.Clock | None = None
         self._font: pygame.font.Font | None = None
+        self._ip_refresh_interval: float = 5.0  # seconds between IP re-checks
+        self._last_ip_check: float = 0.0
+        self._detect_ip_func = None  # set externally for IP refresh
 
     def run(self) -> None:
         """Main render loop (runs on main thread).
@@ -79,11 +84,23 @@ class Renderer:
         running = True
         while running:
             running = self.handle_events()
+            self._maybe_refresh_ip()
             self.render_frame()
             pygame.display.flip()
             self._clock.tick(FPS)
 
         pygame.quit()
+
+    def _maybe_refresh_ip(self) -> None:
+        """Re-detect the local IP every few seconds to handle network changes."""
+        if self._detect_ip_func is None:
+            return
+        now = time.time()
+        if now - self._last_ip_check >= self._ip_refresh_interval:
+            self._last_ip_check = now
+            new_ip = self._detect_ip_func()
+            if new_ip != self._local_ip:
+                self._local_ip = new_ip
 
     def render_frame(self) -> None:
         """Render a complete frame: pitch, players, ball, and HUD.
