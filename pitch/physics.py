@@ -100,6 +100,7 @@ class PhysicsEngine:
             self.apply_friction(ball)
             self.update_ball_position(ball)
             self.handle_boundary_collision(ball)
+            self.handle_player_collision(ball, state)
             self.cap_velocity(ball)
 
             # Check for NaN/Inf after position update
@@ -170,6 +171,69 @@ class PhysicsEngine:
         elif ball.y >= pitch_height:
             ball.y = pitch_height
             ball.vy = -ball.vy
+
+    def handle_player_collision(self, ball: Ball, state: GameState) -> None:
+        """Handle ball collisions with players (deflection/save).
+
+        When the ball overlaps a player (distance < PLAYER_RADIUS), the ball
+        is deflected away from the player. The deflection simulates a realistic
+        bounce off the player's body.
+
+        Special case: Goalkeepers CATCH the ball (velocity zeroed) instead of
+        deflecting it, simulating a save.
+
+        Args:
+            ball: The ball entity to check collisions for.
+            state: The current game state containing all players.
+        """
+        # Only deflect if ball is actually moving
+        ball_speed = math.sqrt(ball.vx ** 2 + ball.vy ** 2)
+        if ball_speed < 0.5:
+            return
+
+        player_radius = _config.PLAYER_RADIUS
+
+        for player_name, player in state.players.items():
+            dx = ball.x - player.x
+            dy = ball.y - player.y
+            dist = math.sqrt(dx * dx + dy * dy)
+
+            if dist < player_radius and dist > 0:
+                # Collision detected!
+                # Normalize the collision vector (ball - player direction)
+                nx = dx / dist
+                ny = dy / dist
+
+                # Check if this is a Goalkeeper
+                is_goalkeeper = "Goalkeeper" in player_name
+
+                if is_goalkeeper:
+                    # Goalkeeper CATCHES the ball — stop it dead
+                    ball.vx = 0.0
+                    ball.vy = 0.0
+                    # Push ball just outside the player to prevent re-collision
+                    ball.x = player.x + nx * (player_radius + 1)
+                    ball.y = player.y + ny * (player_radius + 1)
+                else:
+                    # Outfield player DEFLECTS the ball
+                    # Reflect velocity along the collision normal
+                    dot = ball.vx * nx + ball.vy * ny
+
+                    # Only deflect if ball is moving toward the player
+                    if dot < 0:
+                        ball.vx -= 2 * dot * nx
+                        ball.vy -= 2 * dot * ny
+
+                        # Apply deflection energy loss
+                        ball.vx *= _config.DEFLECTION_FACTOR
+                        ball.vy *= _config.DEFLECTION_FACTOR
+
+                        # Push ball outside player to prevent sticking
+                        ball.x = player.x + nx * (player_radius + 1)
+                        ball.y = player.y + ny * (player_radius + 1)
+
+                # Only handle one collision per tick
+                break
 
     def cap_velocity(self, ball: Ball) -> None:
         """Cap ball velocity to MAX_BALL_SPEED (40 px/tick).

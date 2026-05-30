@@ -1,9 +1,10 @@
 # Agentic Soccer
 
-A multi-agent AI soccer game where LLM-powered agents play football on a shared 2D pitch. The project consists of two components:
+A multi-agent AI soccer game where LLM-powered agents play football on a shared 2D pitch. The project consists of three components:
 
 - **The Pitch** (`pitch/`) — A game server with a PyGame visual frontend and FastAPI REST backend
-- **Agent Control Panel** (`player/`) — A Streamlit dashboard that runs an autonomous AI agent using NVIDIA NIM
+- **Agent Control Panel** (`player/`) — A Streamlit dashboard that runs a single autonomous AI agent using NVIDIA NIM
+- **Multi-Agent Team** (`team/`) — A coordinated team of 5 agents (1 Coach + 4 Players) with tactical instruction passing and a team dashboard
 
 Agents connect over the local network, observe the game state, and submit movement decisions in real time. Players appear on the pitch as soon as they connect — even before the match starts — so you can see who's online and ready.
 
@@ -101,7 +102,38 @@ streamlit run app.py
 
 Configure your NVIDIA API key in `player/.env`, pick a team and position in the sidebar, then click **Start Auto-Play**. Your agent will appear on the pitch immediately — you can see it moving around even before the match starts.
 
-### 3. View the Scoreboard
+### 3. Start a Full Team (multi-agent)
+
+In a separate terminal:
+
+```bash
+cd team
+```
+
+**Using venv:**
+
+```bash
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS/Linux
+source .venv/bin/activate
+```
+
+**Install and run:**
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env and set your NVIDIA_API_KEY
+python main.py
+```
+
+Select a team color in the dashboard and click **Start**. A Coach agent and four Player agents (Goalkeeper, Defender, Midfielder, Striker) will begin playing as a coordinated team.
+
+For AI-vs-AI matches, start a second instance in another terminal with `TEAM_COLOR=Blue`.
+
+### 4. View the Scoreboard
 
 While the server is running, open a browser to:
 
@@ -131,7 +163,8 @@ Players can move freely during the Waiting state to warm up and reposition. Kick
 ```
 agentic_soccer/
 ├── pitch/          # Game server (FastAPI + PyGame)
-├── player/         # AI agent dashboard (Streamlit + NVIDIA NIM)
+├── player/         # Single AI agent dashboard (Streamlit + NVIDIA NIM)
+├── team/           # Multi-agent team (Coach + 4 Players + Team Dashboard)
 └── README.md       # This file
 ```
 
@@ -139,6 +172,7 @@ See each subfolder's README for detailed documentation:
 
 - [pitch/README.md](pitch/README.md) — Server architecture, API reference, game rules, scoreboard
 - [player/README.md](player/README.md) — Agent configuration, how the Look-Think-Act loop works
+- [team/README.md](team/README.md) — Multi-agent team architecture, Coach/Player design, configuration
 
 ## Running Tests
 
@@ -149,6 +183,10 @@ python -m pytest tests/ -v
 
 # Player tests (in a separate terminal)
 cd player
+python -m pytest tests/ -v
+
+# Team tests (in a separate terminal)
+cd team
 python -m pytest tests/ -v
 ```
 

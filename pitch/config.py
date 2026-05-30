@@ -39,6 +39,10 @@ class Config:
     MAX_BALL_SPEED: float = 40.0
     KICK_IMPULSE: float = 20.0
 
+    # Player-ball collision settings
+    PLAYER_RADIUS: float = 15.0  # Collision radius for players
+    DEFLECTION_FACTOR: float = 0.7  # Ball retains 70% speed on deflection
+
     # Goal settings
     GOAL_PAUSE: float = 2.0
 

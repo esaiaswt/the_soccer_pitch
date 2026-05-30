@@ -1,0 +1,9 @@
+langchain-nvidia-ai-endpoints>=0.1
+python-dotenv>=1.0
+requests>=2.31
+streamlit>=1.28
+psutil>=5.9
+hypothesis>=6.82
+pytest>=7.4
+pytest-mock>=3.11
+requests-mock>=1.11
