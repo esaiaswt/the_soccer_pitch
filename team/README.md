@@ -2,6 +2,12 @@
 
 A coordinated multi-agent soccer team that orchestrates a **Coach agent** and four **Player sub-agents** (Goalkeeper, Defender, Midfielder, Striker) to play as a team on the Pitch server. The Coach observes the full game state, detects patterns, and issues natural-language tactical instructions. Each Player runs an independent Look-Think-Act loop on its own thread, making autonomous movement decisions with coach guidance as advisory context.
 
+## Video Demo
+
+https://github.com/user-attachments/assets/01984543-63ee-4e3c-873d-3bec643513d0
+
+
+
 ## Architecture
 
 ```
