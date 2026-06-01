@@ -5,8 +5,12 @@ for a single player position. Each player reads shared game state, optionally
 incorporates Coach instructions, invokes a lightweight LLM for decision-making,
 and posts movement/kick actions to the Pitch server.
 
-Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 5.1, 5.2, 5.3, 5.4, 5.5,
-              7.2, 7.3, 7.4, 7.5
+Integrates agentic modules (episodic memory, planner, reflection engine,
+strategy tracker, context assembler, signal bus, signal generator) into the
+cycle while maintaining exactly one LLM call per cycle.
+
+Requirements: 2.5, 3.2, 3.6, 3.9, 3.10, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6,
+              5.1, 5.2, 5.3, 5.4, 5.5, 7.2, 7.3, 7.4, 7.5, 8.1, 9.1, 9.2, 10.2
 """
 
 from __future__ import annotations
@@ -16,13 +20,16 @@ import json
 import re
 import time
 from threading import Event
+from typing import Optional
 
 import requests
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from team.config import TeamConfig
+from team.context_assembler import assemble_agentic_context
 from team.debug_store import DebugStore, PlayerDebugInfo
+from team.episodic_memory import Episode, EpisodicMemory
 from team.instruction_store import InstructionStore
 from team.logging_config import (
     get_logger,
@@ -31,7 +38,13 @@ from team.logging_config import (
     log_token_usage,
     log_token_usage_unavailable,
 )
+from team.memory_summary import summarize_memory
+from team.planner import Plan, Planner, build_default_templates
+from team.reflection import ReflectionEngine
 from team.shared_state import SharedState
+from team.signal_bus import Signal, SignalBus
+from team.signal_generator import SignalGenerator
+from team.strategy_tracker import PatternEntry, StrategyTracker
 
 # LLM invocation timeout in seconds (Req 5.2)
 _LLM_TIMEOUT_SECONDS = 10
@@ -43,6 +56,9 @@ _LOOP_CYCLE_SECONDS = 3.0
 
 # Backoff time in seconds after a 429 rate limit error
 _RATE_LIMIT_BACKOFF_SECONDS = 5.0
+
+# Interval (in cycles) between strategy tracker analysis runs
+_STRATEGY_ANALYSIS_INTERVAL = 10
 
 
 def _build_system_prompt(position: str, team_color: str) -> str:
@@ -186,10 +202,20 @@ class PlayerAgent:
 
     Each cycle:
     1. LOOK: Read the current game state from SharedState.
-    2. THINK: Invoke the Player LLM with game state + optional Coach instruction.
-    3. ACT: Parse the LLM response and POST the action to the Pitch server.
+    2. POST-LOOK: Evaluate plan, run reflection, store episode, clear signals on dead ball.
+    3. THINK: Invoke the Player LLM with game state + Coach instruction + agentic context.
+    4. ACT: Parse the LLM response and POST the action to the Pitch server.
+    5. POST-ACT: Record episode, record pattern, generate and publish signal.
 
     On LLM timeout or error, submits a Brake_Action (dx=0, dy=0, kick=false).
+
+    Integrates agentic modules:
+    - EpisodicMemory: stores past game states, actions, and outcomes
+    - Planner: evaluates and manages multi-step plans
+    - ReflectionEngine: evaluates action effectiveness
+    - StrategyTracker: tracks opponent patterns and produces adaptations
+    - SignalBus: inter-player communication (shared across all PlayerAgents)
+    - SignalGenerator: generates signals from plan and game state
 
     Parameters
     ----------
@@ -205,6 +231,9 @@ class PlayerAgent:
         Threading event signaling the agent to shut down.
     debug_store : DebugStore
         Debug store for dashboard consumption.
+    signal_bus : SignalBus | None
+        Shared signal bus for inter-player communication. Optional for
+        backward compatibility; when None, signal features are disabled.
     """
 
     def __init__(
@@ -215,6 +244,7 @@ class PlayerAgent:
         instruction_store: InstructionStore,
         stop_event: Event,
         debug_store: DebugStore,
+        signal_bus: Optional[SignalBus] = None,
     ) -> None:
         self._config = config
         self._position = position
@@ -222,6 +252,7 @@ class PlayerAgent:
         self._instruction_store = instruction_store
         self._stop_event = stop_event
         self._debug_store = debug_store
+        self._signal_bus = signal_bus
         self._agent_identity = f"Player_{position}"
         self._llm = ChatNVIDIA(
             model=config.player_model,
@@ -232,6 +263,19 @@ class PlayerAgent:
         )
         self._system_prompt = _build_system_prompt(position, config.team_color)
         self._logger = get_logger()
+
+        # Agentic module instances
+        self._memory = EpisodicMemory()
+        self._planner = Planner(build_default_templates())
+        self._reflection = ReflectionEngine()
+        self._strategy_tracker = StrategyTracker()
+        self._signal_generator = SignalGenerator()
+
+        # Agentic state tracking
+        self._cycle_counter: int = 0
+        self._active_plan: Optional[Plan] = None
+        self._previous_state: Optional[dict] = None
+        self._previous_action: Optional[dict] = None
 
     def run(self) -> None:
         """Thread target: continuous Look-Think-Act loop at 1.5s cycle.
@@ -270,7 +314,16 @@ class PlayerAgent:
         )
 
     def _loop_iteration(self) -> None:
-        """Execute a single Look-Think-Act iteration."""
+        """Execute a single Look-Think-Act iteration with agentic integration.
+
+        Flow:
+        1. Look: read game state from SharedState
+        2. Post-look: increment cycle, evaluate plan, run reflection, detect dead ball
+        3. Pre-think: read signals, assemble agentic context
+        4. Think: single LLM call with enriched state + agentic context
+        5. Act: POST action to Pitch server
+        6. Post-act: record episode, record pattern, generate and publish signal
+        """
         # --- LOOK: Read game state ---
         snapshot = self._shared_state.get_snapshot()
         if snapshot is None:
@@ -296,11 +349,18 @@ class PlayerAgent:
                 )
         # Use whatever snapshot is available (Req 5.4: use last available)
 
+        # --- POST-LOOK: Agentic processing (Req 3.2, 3.6, 5.1, 5.5) ---
+        self._cycle_counter += 1
+        self._post_look_agentic(snapshot)
+
+        # --- PRE-THINK: Read signals and assemble agentic context ---
+        agentic_context = self._assemble_agentic_context()
+
         # --- Read Coach Instruction (Req 4.4, 5.1, 5.5) ---
         instruction_text = self._get_valid_instruction()
 
-        # --- THINK: Invoke LLM ---
-        messages = self._build_messages(snapshot, instruction_text)
+        # --- THINK: Invoke LLM (exactly one call per cycle - Req 9.1, 9.2) ---
+        messages = self._build_messages(snapshot, instruction_text, agentic_context)
         dx, dy, kick = self._invoke_llm(messages, snapshot)
 
         # --- ACT: Post action to Pitch server ---
@@ -313,9 +373,203 @@ class PlayerAgent:
         }
         self._post_action(action_payload, snapshot)
 
-        # --- Update DebugStore ---
+        # --- POST-ACT: Agentic processing ---
         action_dict = {"dx": dx, "dy": dy, "kick": kick}
+        self._post_act_agentic(snapshot, action_dict)
+
+        # --- Update DebugStore ---
         self._update_debug(snapshot, action_dict, instruction_text)
+
+    # ------------------------------------------------------------------
+    # Agentic integration methods
+    # ------------------------------------------------------------------
+
+    def _post_look_agentic(self, snapshot: dict) -> None:
+        """Run agentic processing after look step.
+
+        - Advance active plan if one exists
+        - Check plan abandonment conditions
+        - Evaluate for new/replacement plan
+        - Run reflection on previous action
+        - Clear SignalBus on dead ball detection
+        - Run strategy analysis periodically
+
+        All logic executes in Python without LLM calls (Req 3.6, 5.6, 9.1).
+        """
+        # Plan advancement and evaluation (Req 3.2)
+        if self._active_plan is not None and not self._active_plan.completed:
+            self._active_plan = self._planner.advance(
+                self._active_plan, snapshot, self._config.team_color, self._position
+            )
+
+        # Check abandonment (including reflection-based abandonment)
+        if self._active_plan is not None and not self._active_plan.completed:
+            if self._planner.should_abandon(
+                self._active_plan, snapshot, self._config.team_color, self._position
+            ):
+                self._active_plan = None
+
+        # Evaluate for new or replacement plan
+        self._active_plan = self._planner.evaluate(
+            snapshot, self._config.team_color, self._position, self._active_plan
+        )
+
+        # Clear completed plans
+        if self._active_plan is not None and self._active_plan.completed:
+            self._active_plan = None
+
+        # Reflection on previous action (Req 5.1, 5.5)
+        if self._previous_action is not None and self._previous_state is not None:
+            reflection_result = self._reflection.evaluate(
+                action=self._previous_action,
+                expected_outcome={},
+                actual_state=snapshot,
+                previous_state=self._previous_state,
+            )
+
+            if reflection_result is not None:
+                # Update the most recent episode's effectiveness
+                if len(self._memory) > 0:
+                    recent = self._memory.get_recent(1)
+                    if recent:
+                        recent[0].effectiveness = reflection_result.effectiveness_score
+
+                # Check reflection-based abandonment
+                if (
+                    reflection_result.should_abandon_plan
+                    and self._active_plan is not None
+                ):
+                    self._active_plan = None
+
+        # Clear SignalBus on dead ball detection (Req 7.4, 8.5)
+        if self._signal_bus is not None:
+            is_dead_ball = snapshot.get("dead_ball", False) or snapshot.get(
+                "is_dead_ball", False
+            )
+            if is_dead_ball:
+                self._signal_bus.clear()
+
+        # Run strategy analysis periodically
+        if self._cycle_counter % _STRATEGY_ANALYSIS_INTERVAL == 0:
+            self._strategy_tracker.analyze()
+
+    def _assemble_agentic_context(self) -> str:
+        """Assemble agentic context for the LLM prompt.
+
+        Combines memory summary, current plan step, adaptation hints,
+        and teammate signals into a single string respecting the 300-token budget.
+
+        Returns
+        -------
+        str
+            Assembled agentic context string, or empty string if nothing to add.
+        """
+        # Memory summary (Req 2.5)
+        memory_summary = summarize_memory(self._memory)
+
+        # Current plan step (Req 3.9: include when plan active, Req 3.10: omit when no plan)
+        plan_step: Optional[str] = None
+        if self._active_plan is not None and not self._active_plan.completed:
+            idx = self._active_plan.current_index
+            if idx < len(self._active_plan.sub_goals):
+                plan_step = self._active_plan.sub_goals[idx].description
+
+        # Adaptation hints from strategy tracker
+        adaptations = self._strategy_tracker.get_active_adaptations()
+        adaptation_hints = [
+            f"{a.counter_strategy} (confidence: {a.confidence:.0%})"
+            for a in adaptations
+        ]
+
+        # Read signals from SignalBus (exclude own position) (Req 7.2)
+        signals: Optional[list[str]] = None
+        if self._signal_bus is not None:
+            raw_signals = self._signal_bus.read_all(exclude_position=self._position)
+            if raw_signals:
+                signals = [
+                    f"{s.sender_position}: {s.signal_type} ({s.payload})"
+                    for s in raw_signals
+                ]
+
+        return assemble_agentic_context(
+            memory_summary=memory_summary,
+            plan_step=plan_step,
+            adaptation_hints=adaptation_hints,
+            signals=signals,
+        )
+
+    def _post_act_agentic(self, snapshot: dict, action_dict: dict) -> None:
+        """Run agentic processing after act step.
+
+        - Store episode in memory
+        - Record pattern in strategy tracker
+        - Generate and publish signal via SignalGenerator
+        - Save state for next cycle's reflection
+
+        All logic executes in Python without LLM calls (Req 9.1).
+        """
+        # Store episode in memory
+        episode = Episode(
+            cycle=self._cycle_counter,
+            game_state=snapshot,
+            action=action_dict,
+            next_state_delta={},  # Will be computed by reflection in next cycle
+            effectiveness=None,  # Will be filled by reflection in next cycle
+        )
+        self._memory.add(episode)
+
+        # Record pattern in strategy tracker
+        opponents = self._extract_opponent_positions(snapshot)
+        ball_pos = snapshot.get("ball", {"x": 600.0, "y": 400.0})
+        # Use previous reflection score if available, default to 0.5 (neutral)
+        effectiveness = 0.5
+        if len(self._memory) >= 2:
+            recent = self._memory.get_recent(2)
+            if recent[0].effectiveness is not None:
+                effectiveness = recent[0].effectiveness
+
+        pattern_entry = PatternEntry(
+            opponent_positions=opponents,
+            ball_position=ball_pos,
+            effectiveness=effectiveness,
+        )
+        self._strategy_tracker.record(pattern_entry)
+
+        # Generate and publish signal via SignalGenerator (Req 8.1)
+        if self._signal_bus is not None:
+            signal = self._signal_generator.generate(
+                plan=self._active_plan,
+                game_state=snapshot,
+                team=self._config.team_color,
+                position=self._position,
+            )
+            if signal is not None:
+                self._signal_bus.publish(signal)
+
+        # Save state for next cycle's reflection
+        self._previous_state = snapshot
+        self._previous_action = action_dict
+
+    def _extract_opponent_positions(self, game_state: dict) -> list[dict]:
+        """Extract opponent player positions from game state.
+
+        Parameters
+        ----------
+        game_state : dict
+            The current game state snapshot.
+
+        Returns
+        -------
+        list[dict]
+            List of opponent position dicts with 'x' and 'y' keys.
+        """
+        players = game_state.get("players", {})
+        opponent_team = "Blue" if self._config.team_color == "Red" else "Red"
+        positions = []
+        for key, pos in players.items():
+            if key.startswith(f"{opponent_team}_"):
+                positions.append({"x": pos.get("x", 0.0), "y": pos.get("y", 0.0)})
+        return positions
 
     def _get_valid_instruction(self) -> str | None:
         """Retrieve the latest Coach instruction if it's not stale.
@@ -355,12 +609,13 @@ class PlayerAgent:
         return instruction.content
 
     def _build_messages(
-        self, snapshot: dict, instruction_text: str | None
+        self, snapshot: dict, instruction_text: str | None, agentic_context: str = ""
     ) -> list:
         """Build the LLM message list with game state and pre-computed spatial analysis.
 
-        Includes directional hints, shooting alignment check, and a recommendation
-        so the LLM doesn't have to do coordinate math.
+        Includes directional hints, shooting alignment check, a recommendation,
+        and agentic context (memory + plan + adaptations + signals) appended
+        after the spatial analysis block (Req 2.5).
 
         Parameters
         ----------
@@ -368,6 +623,8 @@ class PlayerAgent:
             The current game state snapshot.
         instruction_text : str | None
             The Coach instruction content, or None if unavailable/stale.
+        agentic_context : str
+            Assembled agentic context to append after spatial analysis.
 
         Returns
         -------
@@ -498,6 +755,10 @@ class PlayerAgent:
         )
         for player_name, pos in players.items():
             state_text += f"  - {player_name}: x={pos.get('x', '?'):.0f}, y={pos.get('y', '?'):.0f}\n"
+
+        # Append agentic context after spatial analysis (Req 2.5)
+        if agentic_context:
+            state_text += f"\n--- AGENTIC CONTEXT ---\n{agentic_context}\n---\n"
 
         # Include Coach instruction if available (Req 4.4)
         if instruction_text is not None:

@@ -3,8 +3,8 @@
 A multi-agent AI soccer game where LLM-powered agents play football on a shared 2D pitch. The project consists of three components:
 
 - **The Pitch** (`pitch/`) — A game server with a PyGame visual frontend and FastAPI REST backend
-- **Agent Control Panel** (`player/`) — A Streamlit dashboard that runs a single autonomous AI agent using NVIDIA NIM
-- **Multi-Agent Team** (`team/`) — A coordinated team of 5 agents (1 Coach + 4 Players) with tactical instruction passing and a team dashboard
+- **Agent Control Panel** (`player/`) — A Streamlit dashboard that runs a single autonomous AI agent using NVIDIA NIM, with episodic memory, multi-step planning, self-reflection, and opponent adaptation
+- **Multi-Agent Team** (`team/`) — A coordinated team of 5 agents (1 Coach + 4 Players) with tactical instruction passing, inter-player signal communication, and agentic capabilities (memory, planning, reflection, adaptation)
 
 Agents connect over the local network, observe the game state, and submit movement decisions in real time. Players appear on the pitch as soon as they connect — even before the match starts — so you can see who's online and ready.
 

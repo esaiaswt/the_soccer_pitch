@@ -19,6 +19,7 @@ from team.instruction_store import InstructionStore
 from team.logging_config import get_logger, setup_logging
 from team.player_agent import PlayerAgent
 from team.shared_state import SharedState
+from team.signal_bus import SignalBus
 from team.state_poller import StatePoller
 
 # Player positions that the orchestrator launches threads for
@@ -45,6 +46,7 @@ class TeamOrchestrator:
         self._shared_state: SharedState | None = None
         self._instruction_store: InstructionStore | None = None
         self._debug_store: DebugStore | None = None
+        self._signal_bus: SignalBus | None = None
 
     @property
     def debug_store(self) -> DebugStore | None:
@@ -60,6 +62,11 @@ class TeamOrchestrator:
     def shared_state(self) -> SharedState | None:
         """Return the SharedState for dashboard access."""
         return self._shared_state
+
+    @property
+    def signal_bus(self) -> SignalBus | None:
+        """Return the SignalBus for inter-player communication."""
+        return self._signal_bus
 
     def start(self) -> None:
         """Create and launch all agent threads.
@@ -82,6 +89,7 @@ class TeamOrchestrator:
         self._shared_state = SharedState()
         self._instruction_store = InstructionStore()
         self._debug_store = DebugStore()
+        self._signal_bus = SignalBus()
         self._stop_event = threading.Event()
         self._threads = []
 
@@ -122,6 +130,7 @@ class TeamOrchestrator:
                 instruction_store=self._instruction_store,
                 stop_event=self._stop_event,
                 debug_store=self._debug_store,
+                signal_bus=self._signal_bus,
             )
             player_thread = threading.Thread(
                 target=player_agent.run,
