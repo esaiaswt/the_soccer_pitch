@@ -21,10 +21,18 @@ https://github.com/user-attachments/assets/01984543-63ee-4e3c-873d-3bec643513d0
 │  ┌──────────────┐    ┌──────────────────┐               │
 │  │ Coach Agent  │───▶│ InstructionStore │◀── players read│
 │  └──────────────┘    └──────────────────┘               │
+│         │                                                │
+│         └── reads player adaptation data                 │
 │                                                          │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────┐ │
 │  │ Goalkeeper │ │  Defender  │ │ Midfielder │ │Striker│ │
-│  └────────────┘ └────────────┘ └────────────┘ └──────┘ │
+│  └─────┬──────┘ └─────┬──────┘ └─────┬──────┘ └──┬───┘ │
+│        │               │               │            │     │
+│        └───────────────┴───────┬───────┴────────────┘     │
+│                                │                          │
+│                       ┌────────▼────────┐                 │
+│                       │   Signal Bus    │                 │
+│                       └─────────────────┘                 │
 │                                                          │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │           Streamlit Team Dashboard                │   │
@@ -114,10 +122,30 @@ The Coach runs on a configurable cadence (default 7s):
 
 ### Player Agents
 
-Each Player runs a continuous Look-Think-Act loop (1.5s cycle):
+Each Player runs a continuous Look-Think-Act loop (3s cycle):
 1. **Look** — Read the shared game state
-2. **Think** — Invoke the Player LLM with game state + Coach instruction (if fresh)
-3. **Act** — Parse the LLM response into movement (dx, dy, kick) and POST to the Pitch server
+2. **Post-Look** — Evaluate plan, run reflection, clear signals on dead ball
+3. **Think** — Invoke the Player LLM with game state + Coach instruction + agentic context (signals, memory, plan, adaptations)
+4. **Act** — Parse the LLM response into movement (dx, dy, kick) and POST to the Pitch server
+5. **Post-Act** — Record episode, track patterns, generate and publish signal to teammates
+
+### Agentic Capabilities
+
+Both the Coach and Player agents integrate agentic modules that execute entirely in Python (no extra LLM calls):
+
+| Module | Scope | Purpose |
+|--------|-------|---------|
+| **Episodic Memory** | Per-player | Stores past game states, actions, and outcomes (ring buffer, max 100) |
+| **Memory Summarizer** | Per-player | Formats 5 most recent episodes as compact LLM context |
+| **Planner** | Per-player | Template-based multi-step plans (score_goal, defend_goal, intercept_ball, distribute_ball) |
+| **Reflection Engine** | Per-player | Scores action effectiveness, signals plan abandonment after 5 consecutive low scores |
+| **Strategy Tracker** | Per-player | Detects opponent tendencies via directional frequency analysis |
+| **Signal Bus** | Shared | Thread-safe inter-player communication (most recent signal per position) |
+| **Signal Generator** | Per-player | Generates signals from plan state (requesting_pass, ready_to_pass, supporting) |
+| **Context Assembler** | Per-player | Combines memory + plan + adaptations + signals within 300-token budget |
+| **Coach Adaptation** | Coach | Aggregates player adaptation data, detects shared tendencies, issues coordinated instructions |
+
+All agentic processing maintains exactly **one LLM call per player per cycle**.
 
 ### Resilience
 
@@ -159,8 +187,9 @@ python -m pytest tests/ -v
 
 The test suite includes:
 - Unit tests for each module
-- Property-based tests (Hypothesis) validating 12 correctness properties
-- Integration tests for end-to-end data flow and multi-instance isolation
+- Property-based tests (Hypothesis) validating 26 correctness properties
+- Integration tests for end-to-end data flow, thread safety, and multi-instance isolation
+- Application independence tests (no cross-package imports)
 
 No API key or running Pitch server is needed to run tests.
 
@@ -174,28 +203,22 @@ team/
 ├── config.py             # Configuration loading and validation
 ├── orchestrator.py       # Thread lifecycle management
 ├── state_poller.py       # Polls Pitch server for game state
-├── coach_agent.py        # Coach memory + LLM instruction generation
-├── player_agent.py       # Player Look-Think-Act loop
+├── coach_agent.py        # Coach memory + LLM instruction generation + adaptation aggregation
+├── player_agent.py       # Player Look-Think-Act loop with agentic integration
 ├── shared_state.py       # Thread-safe game state container
 ├── instruction_store.py  # Thread-safe Coach-to-Player instructions
+├── episodic_memory.py    # Ring buffer for past game episodes
+├── memory_summary.py     # Compact text formatting of recent memory
+├── planner.py            # Template-based multi-step planning
+├── reflection.py         # Action effectiveness scoring
+├── strategy_tracker.py   # Opponent pattern detection and adaptation
+├── signal_bus.py         # Thread-safe inter-player signal communication
+├── signal_generator.py   # Automatic signal generation from plan/game state
+├── context_assembler.py  # Priority-based agentic context assembly
 ├── debug_store.py        # Debug data for dashboard
 ├── logging_config.py     # Structured logging setup
 ├── port_scanner.py       # Streamlit port auto-assignment
 ├── requirements.txt      # Python dependencies
 ├── .env.example          # Configuration template
 └── tests/                # Test suite
-    ├── test_properties.py    # Property-based tests (Hypothesis)
-    ├── test_integration.py   # End-to-end integration tests
-    ├── test_config.py
-    ├── test_shared_state.py
-    ├── test_instruction_store.py
-    ├── test_debug_store.py
-    ├── test_logging_config.py
-    ├── test_state_poller.py
-    ├── test_coach_memory.py
-    ├── test_coach_agent.py
-    ├── test_player_agent.py
-    ├── test_orchestrator.py
-    ├── test_port_scanner.py
-    └── test_main.py
 ```

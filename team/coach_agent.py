@@ -27,6 +27,7 @@ from team.logging_config import (
     log_token_usage_unavailable,
 )
 from team.shared_state import SharedState
+from team.strategy_tracker import StrategyTracker
 
 # Required fields that every snapshot must contain to be stored in memory
 REQUIRED_SNAPSHOT_FIELDS = ("ball", "players", "score", "time_left", "match_state")
@@ -152,6 +153,10 @@ class CoachAgent:
         Threading event signaling the agent to shut down.
     debug_store : DebugStore | None
         Optional debug store for dashboard consumption.
+    player_trackers : dict[str, StrategyTracker] | None
+        Optional mapping from player position (e.g., "Striker") to that
+        player's StrategyTracker. Used to aggregate adaptation data into
+        the coaching prompt.
     """
 
     def __init__(
@@ -161,12 +166,14 @@ class CoachAgent:
         instruction_store: InstructionStore,
         stop_event: Event,
         debug_store: DebugStore | None = None,
+        player_trackers: dict[str, StrategyTracker] | None = None,
     ) -> None:
         self._config = config
         self._shared_state = shared_state
         self._instruction_store = instruction_store
         self._stop_event = stop_event
         self._debug_store = debug_store
+        self._player_trackers = player_trackers
         self._memory = CoachMemory(max_size=config.coach_memory_size)
         self._llm = ChatNVIDIA(
             model=config.coach_model,
@@ -332,12 +339,86 @@ class CoachAgent:
                 f"y={oldest.get('ball', {}).get('y', '?')}\n"
             )
 
+        # Append player adaptation section (Req 11.1, 11.2, 11.4)
+        adaptation_section = self._build_adaptation_section()
+        if adaptation_section:
+            state_text += "\n" + adaptation_section
+
         from langchain_core.messages import HumanMessage, SystemMessage
 
         return [
             SystemMessage(content=_COACH_SYSTEM_PROMPT),
             HumanMessage(content=state_text),
         ]
+
+    def _build_adaptation_section(self) -> str:
+        """Aggregate player adaptation data into a prompt section.
+
+        Collects active AdaptationRecords from all player StrategyTrackers,
+        formats at most 1 sentence per player, detects shared opponent
+        tendencies across multiple players, and limits the section to
+        200 tokens (~800 characters).
+
+        Does NOT directly modify player memories, plans, or trackers.
+
+        Returns
+        -------
+        str
+            The adaptation context section, or empty string if no data.
+        """
+        if not self._player_trackers:
+            return ""
+
+        # Collect per-player adaptation summaries and track pattern frequencies
+        player_lines: list[str] = []
+        pattern_counts: dict[str, list[str]] = {}  # pattern -> list of positions
+
+        for position, tracker in self._player_trackers.items():
+            adaptations = tracker.get_active_adaptations(max_count=2)
+            if not adaptations:
+                continue
+
+            # Use the highest-confidence adaptation for the 1-sentence summary
+            top = adaptations[0]
+            player_lines.append(f"{position} reports: {top.observed_pattern}")
+
+            # Track which positions report each pattern
+            for adaptation in adaptations:
+                pattern = adaptation.observed_pattern
+                if pattern not in pattern_counts:
+                    pattern_counts[pattern] = []
+                pattern_counts[pattern].append(position)
+
+        if not player_lines:
+            return ""
+
+        # Build the section
+        lines: list[str] = ["Player Adaptation Insights:"]
+        lines.extend(player_lines)
+
+        # Detect shared tendencies (2+ players report the same pattern)
+        shared_instructions: list[str] = []
+        for pattern, positions in pattern_counts.items():
+            if len(positions) >= 2:
+                positions_str = " and ".join(positions)
+                shared_instructions.append(
+                    f"COORDINATED: {positions_str} both report {pattern} — "
+                    f"issue team-wide adjustment"
+                )
+
+        if shared_instructions:
+            lines.append("Coordinated Instructions:")
+            lines.extend(shared_instructions)
+
+        # Join and enforce 200 token limit (~800 characters)
+        max_chars = 800
+        section = "\n".join(lines)
+
+        if len(section) > max_chars:
+            # Truncate by removing player lines from the end (keep coordinated instructions)
+            section = section[:max_chars].rsplit("\n", 1)[0]
+
+        return section
 
     def _parse_instructions(self, response_text: str) -> dict[str, str]:
         """Parse the LLM response into per-player instructions.

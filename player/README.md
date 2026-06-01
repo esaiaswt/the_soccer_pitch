@@ -116,12 +116,29 @@ The agent runs a continuous loop every 1.5 seconds:
 | Step | Action |
 |------|--------|
 | **Look** | GET `/api/state` — polls the game server for ball/player positions |
-| **Think** | Sends game state + system prompt to the LLM, receives structured movement decision (dx, dy, kick) |
+| **Post-Look** | Evaluate plan, run reflection on previous action, store episode in memory |
+| **Think** | Sends game state + spatial analysis + agentic context to the LLM, receives movement decision (dx, dy, kick) |
 | **Act** | POST `/api/action` — submits the movement vector, kick decision, and agent name to the server |
+| **Post-Act** | Record episode, track opponent patterns, update strategy |
 
 If anything fails (network error, LLM timeout, invalid response), the agent sends a **Brake Action** (no movement, no kick) to stay safe on the pitch.
 
 The agent name you set in the sidebar is sent with every action. On the pitch, your player is displayed as `"AgentName (Position)"` (e.g., "MyBot (Striker)"). If no name is set, it falls back to `"Team_Position"`.
+
+## Agentic Capabilities
+
+The agent includes five agentic modules that execute entirely in Python (no extra LLM calls), injecting summarized context into the single LLM call per cycle:
+
+| Module | Purpose |
+|--------|---------|
+| **Episodic Memory** | Stores past game states, actions, and outcomes in a ring buffer (max 100 episodes) |
+| **Memory Summarizer** | Formats the 5 most recent episodes as compact text for the LLM prompt |
+| **Planner** | Selects multi-step plans from tactical templates (score_goal, defend_goal, intercept_ball, distribute_ball) |
+| **Reflection Engine** | Scores action effectiveness and signals plan abandonment after 5 consecutive low scores |
+| **Strategy Tracker** | Detects opponent tendencies via directional frequency analysis and recommends counter-strategies |
+| **Context Assembler** | Combines memory + plan step + adaptation hints within a 300-token budget |
+
+All agentic processing maintains exactly **one LLM call per cycle** — the modules enrich the prompt context without adding API calls.
 
 ## Project Structure
 
@@ -132,6 +149,12 @@ player/
 ├── llm_client.py       # ChatNVIDIA initialization and invocation
 ├── config.py           # Constants, ActionModel, validation helpers
 ├── spatial.py          # Spatial analysis for enriched game state
+├── episodic_memory.py  # Ring buffer for past game episodes
+├── memory_summary.py   # Compact text formatting of recent memory
+├── planner.py          # Template-based multi-step planning
+├── reflection.py       # Action effectiveness scoring
+├── strategy_tracker.py # Opponent pattern detection and adaptation
+├── context_assembler.py# Priority-based agentic context assembly
 ├── logging_config.py   # File-based logging setup
 ├── requirements.txt    # Python dependencies
 ├── .env                # NVIDIA_API_KEY (gitignored)
